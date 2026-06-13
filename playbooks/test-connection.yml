@@ -1,0 +1,29 @@
+---
+- name: "Проверка доступности хостов"
+  hosts: all
+  gather_facts: yes
+  
+  tasks:
+    - name: "Проверка связи"
+      ping:
+    
+    - name: "Информация о системе"
+      debug:
+        msg:
+          - "Хост: {{ inventory_hostname }}"
+          - "ОС: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Ядро: {{ ansible_kernel }}"
+          - "Архитектура: {{ ansible_architecture }}"
+    
+    - name: "Проверка доступных обновлений безопасности"
+      command: "dnf check-update --security"
+      register: security_updates
+      failed_when: false
+      when: ansible_os_family == "RedHat"
+    
+    - name: "Список security обновлений"
+      debug:
+        var: security_updates.stdout_lines
+      when: 
+        - security_updates is defined
+        - security_updates.stdout | length > 0
