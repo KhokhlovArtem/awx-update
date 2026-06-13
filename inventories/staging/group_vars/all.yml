@@ -1,6 +1,0 @@
----
-# Staging окружение - более рискованные настройки для тестов
-auto_reboot: true
-update_level: security
-update_serial: "50%"
-backup_enabled: false

@@ -1,70 +1,193 @@
 ---
-- name: "Критическое обновление серверов Linux (только Security)"
+- name: "КРИТИЧЕСКИЕ ОБНОВЛЕНИЯ LINUX (только Security Critical)"
   hosts: "{{ target_hosts | default('all') }}"
-  gather_facts: yes
   become: yes
+  gather_facts: yes
 
-  # Обновляем серверы порциями по 25%, чтобы не потерять все сразу
-  serial: "{{ update_serial | default('25%') }}"
-
-  # Максимальное время выполнения 2 часа
-  max_fail_percentage: 10
+  serial: "{{ update_serial | default('20%') }}"
+  timeout: 1800
 
   vars:
-    # Настройки обновления
-    os_update_level: "{{ update_level | default('security') }}"
-    os_update_reboot: "{{ auto_reboot | default(false) }}"
-    os_update_reboot_timeout: 300
-    os_update_remove_old_kernel: true
-    os_update_include_obsoletes: false
+    log_dir: "/var/log/ansible-updates"
+    timestamp: "{{ ansible_date_time.epoch }}"
 
-    # Логирование
-    os_update_logfile: /var/log/ansible-security-updates.log
+  tasks:
+    - name: "Создание директории для логов"
+      file:
+        path: "{{ log_dir }}"
+        state: directory
+        mode: '0755'
 
-  pre_tasks:
-    - name: "Проверка версии ОС"
-      fail:
-        msg: "Эта роль поддерживает только RHEL/CentOS/Rocky/AlmaLinux 7+ и Ubuntu 18.04+"
-      when:
-        - ansible_os_family != "RedHat"
-        - ansible_distribution != "Ubuntu"
-        - ansible_distribution != "Debian"
-
-    - name: "Создание backup списка пакетов до обновления"
-      copy:
-        content: |
-          Дата: {{ ansible_date_time.iso8601 }}
-          Хост: {{ inventory_hostname }}
-          Установленные пакеты до обновления:
-          ---
-        dest: "/tmp/pre-update-packages-{{ ansible_date_time.epoch }}.txt"
-      delegate_to: localhost
-      run_once: true
-
-  roles:
-    - role: joe-speedboat.os_update
-
-  post_tasks:
-    - name: "Сохранение списка обновленных пакетов"
-      command: "rpm -qa --last | head -50"
-      register: updated_packages
+    - name: "Сохранение состояния до обновления"
+      command: "rpm -qa --qf '%{NAME}\\n' | sort"
+      register: packages_before
       when: ansible_os_family == "RedHat"
 
-    - name: "Вывод информации о перезагрузке"
+    - name: "Сохранение состояния до обновления (Debian)"
+      command: "dpkg-query -W -f='${Package}\\n' | sort"
+      register: packages_before
+      when: ansible_os_family == "Debian"
+
+    - name: "ОБНОВЛЕНИЕ RHEL-СИСТЕМ (Security Critical Only)"
+      when:
+        - ansible_os_family == "RedHat"
+        - ansible_distribution_major_version | int >= 7
+      block:
+        - name: "Проверка доступных критических обновлений"
+          command: >
+            dnf update-minimal --security --sec-severity=Critical --assumeno 2>&1 || true
+          register: available_updates
+          changed_when: false
+          failed_when: false
+
+        - name: "Вывод найденных критических обновлений"
+          debug:
+            msg: "Найдены критические обновления:\n{{ available_updates.stdout_lines }}"
+          when: available_updates.stdout | length > 0
+
+        - name: "Установка только критических обновлений безопасности"
+          dnf:
+            name: "*"
+            state: latest
+            security: yes
+            bugfix: no
+            update_only: yes
+          register: update_result
+          when: available_updates.stdout | length > 0
+
+        - name: "Проверка обновления ядра"
+          command: "rpm -q kernel"
+          register: current_kernel
+          changed_when: false
+
+        - name: "Сравнение версий ядра"
+          shell: >
+            rpm -q kernel --last | head -1 | awk '{print $1}'
+          register: latest_kernel
+          changed_when: false
+
+        - name: "Создание триггера перезагрузки (если ядро обновлено)"
+          copy:
+            content: |
+              Обновление выполнено: {{ ansible_date_time.iso8601 }}
+              Старое ядро: {{ current_kernel.stdout_lines[0] }}
+              Новое ядро: {{ latest_kernel.stdout }}
+            dest: "{{ log_dir }}/reboot-required-{{ timestamp }}.txt"
+          when:
+            - update_result.changed
+            - current_kernel.stdout_lines[0] != latest_kernel.stdout
+
+    - name: "ОБНОВЛЕНИЕ DEBIAN/UBUNTU (Security Updates Only)"
+      when: ansible_os_family == "Debian"
+      block:
+        - name: "Обновление списка пакетов"
+          apt:
+            update_cache: yes
+            cache_valid_time: 3600
+          register: apt_update
+
+        - name: "Получение списка security обновлений"
+          shell: >
+            apt list --upgradable 2>/dev/null | grep -i security | cut -d/ -f1 || true
+          register: security_packages
+          changed_when: false
+
+        - name: "Вывод найденных security обновлений"
+          debug:
+            msg: "Найдены security обновления:\n{{ security_packages.stdout_lines }}"
+          when: security_packages.stdout | length > 0
+
+        - name: "Установка только security обновлений"
+          apt:
+            name: "{{ security_packages.stdout_lines }}"
+            state: latest
+            only_upgrade: yes
+            force_apt_get: yes
+          register: update_result
+          when: security_packages.stdout | length > 0
+
+        - name: "Проверка необходимости перезагрузки"
+          stat:
+            path: /var/run/reboot-required
+          register: reboot_required_file
+
+        - name: "Создание триггера перезагрузки"
+          copy:
+            content: "Обновление выполнено: {{ ansible_date_time.iso8601 }}"
+            dest: "{{ log_dir }}/reboot-required-{{ timestamp }}.txt"
+          when: reboot_required_file.stat.exists
+
+    - name: "ОБНОВЛЕНИЕ SUSE (Security Updates Only)"
+      when: ansible_os_family == "Suse"
+      block:
+        - name: "Установка critical security патчей"
+          command: >
+            zypper --non-interactive patch --category=security --severity=critical
+          register: update_result
+          failed_when: false
+
+        - name: "Проверка необходимости перезагрузки"
+          stat:
+            path: /var/run/reboot-required
+          register: reboot_required_file
+
+        - name: "Создание триггера перезагрузки"
+          copy:
+            content: "Обновление выполнено: {{ ansible_date_time.iso8601 }}"
+            dest: "{{ log_dir }}/reboot-required-{{ timestamp }}.txt"
+          when: reboot_required_file.stat.exists
+
+    - name: "Сохранение состояния после обновления"
+      command: "rpm -qa --qf '%{NAME}\\n' | sort"
+      register: packages_after
+      when:
+        - update_result.changed | default(false)
+        - ansible_os_family == "RedHat"
+
+    - name: "Сохранение состояния после обновления (Debian)"
+      command: "dpkg-query -W -f='${Package}\\n' | sort"
+      register: packages_after
+      when:
+        - update_result.changed | default(false)
+        - ansible_os_family == "Debian"
+
+    - name: "Расчет изменений"
+      set_fact:
+        new_packages: "{{ packages_after.stdout_lines | difference(packages_before.stdout_lines) }}"
+      when:
+        - update_result.changed | default(false)
+        - packages_before is defined
+        - packages_after is defined
+
+    - name: "ФИНАЛЬНЫЙ ОТЧЕТ ПО ХОСТУ"
       debug:
         msg:
-          - "========================================"
-          - "ОБНОВЛЕНИЕ ЗАВЕРШЕНО НА ХОСТЕ {{ inventory_hostname }}"
-          - "Требуется перезагрузка: {{ ansible_reboot_pending | default(false) }}"
-          - "========================================"
+          - "=========================================="
+          - "ХОСТ: {{ inventory_hostname }}"
+          - "ОС: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "ОБНОВЛЕНИЙ УСТАНОВЛЕНО: {{ update_result.changed | default(0) }}"
+          - "НОВЫХ ПАКЕТОВ: {{ new_packages | length if new_packages is defined else 0 }}"
+          - "ТРЕБУЕТСЯ ПЕРЕЗАГРУЗКА: {{ (reboot_required_file.stat.exists | default(false)) or (latest_kernel.stdout is defined and current_kernel.stdout_lines[0] != latest_kernel.stdout) }}"
+          - "ЛОГ ФАЙЛ: {{ log_dir }}/reboot-required-{{ timestamp }}.txt"
+          - "=========================================="
 
-    - name: "Создание файла-триггера для перезагрузки"
+    - name: "Сохранение отчета в файл"
       copy:
-        content: "{{ ansible_date_time.iso8601 }} - Требуется перезагрузка после обновления"
-        dest: "/var/run/reboot-required.ansible"
-      when: ansible_reboot_pending | default(false)
+        content: |
+          ОТЧЕТ ОБ ОБНОВЛЕНИИ
+          ===================
+          Хост: {{ inventory_hostname }}
+          Время: {{ ansible_date_time.iso8601 }}
+          ОС: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Ядро: {{ ansible_kernel }}
 
-    - name: "Вывод последних обновленных пакетов"
-      debug:
-        var: updated_packages.stdout_lines[0:20]
-      when: updated_packages is defined
+          Установленные обновления:
+          {% if new_packages is defined %}
+          {{ new_packages | to_nice_yaml }}
+          {% else %}
+          Нет новых обновлений
+          {% endif %}
+
+          Требуется перезагрузка: {{ (reboot_required_file.stat.exists | default(false)) or (latest_kernel.stdout is defined and current_kernel.stdout_lines[0] != latest_kernel.stdout) }}
+        dest: "{{ log_dir }}/update-report-{{ inventory_hostname }}-{{ timestamp }}.txt"
+      delegate_to: localhost

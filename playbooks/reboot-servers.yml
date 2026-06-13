@@ -1,52 +1,66 @@
 ---
-- name: "Безопасная перезагрузка серверов после обновлений"
+- name: "БЕЗОПАСНАЯ ПЕРЕЗАГРУЗКА СЕРВЕРОВ"
   hosts: "{{ target_hosts | default('all') }}"
   become: yes
   gather_facts: yes
 
-  # Перезагружаем по одному серверу
   serial: 1
 
   vars:
-    reboot_wait: 120  # Секунд ждем после перезагрузки
+    log_dir: "/var/log/ansible-updates"
     reboot_timeout: 600
+    wait_for_services: 120
 
   tasks:
-    - name: "Проверка наличия триггера перезагрузки"
-      stat:
-        path: /var/run/reboot-required.ansible
-      register: reboot_required_file
+    - name: "Поиск файлов-триггеров перезагрузки"
+      find:
+        paths: "{{ log_dir }}"
+        patterns: "reboot-required-*.txt"
+      register: reboot_triggers
 
-    - name: "Пропуск хостов, не требующих перезагрузки"
+    - name: "Проверка необходимости перезагрузки"
       debug:
-        msg: "Хост {{ inventory_hostname }} не требует перезагрузки, пропускаем"
-      when: not reboot_required_file.stat.exists
+        msg: "Хост {{ inventory_hostname }} не требует перезагрузки"
+      when: reboot_triggers.files | length == 0
 
-    - name: "Блок перезагрузки для требующих хостов"
+    - name: "БЛОК ПЕРЕЗАГРУЗКИ"
+      when: reboot_triggers.files | length > 0
       block:
         - name: "Предупреждение о перезагрузке"
           debug:
-            msg: "ПЕРЕЗАГРУЗКА ХОСТА {{ inventory_hostname }} через 10 секунд"
+            msg:
+              - "ПЕРЕЗАГРУЗКА ХОСТА {{ inventory_hostname }}"
+              - "Причина: {{ lookup('file', reboot_triggers.files[0].path) }}"
+
+        - name: "Ожидание 10 секунд перед перезагрузкой"
+          wait_for:
+            timeout: 10
+          delegate_to: localhost
 
         - name: "Перезагрузка сервера"
           reboot:
             reboot_timeout: "{{ reboot_timeout }}"
-            pre_reboot_delay: 10
-            post_reboot_delay: "{{ reboot_wait }}"
+            pre_reboot_delay: 5
+            post_reboot_delay: "{{ wait_for_services }}"
             msg: "Плановая перезагрузка после обновления безопасности"
           register: reboot_result
 
-        - name: "Удаление файла-триггера после успешной перезагрузки"
-          file:
-            path: /var/run/reboot-required.ansible
-            state: absent
-
-        - name: "Проверка доступности сервисов после перезагрузки"
+        - name: "Проверка доступности SSH"
           wait_for:
             host: "{{ inventory_hostname }}"
             port: 22
             delay: 10
-            timeout: 300
+            timeout: "{{ reboot_timeout }}"
           delegate_to: localhost
 
-      when: reboot_required_file.stat.exists
+        - name: "Проверка доступности серверов"
+          ping:
+
+        - name: "Удаление триггеров перезагрузки"
+          file:
+            path: "{{ reboot_triggers.files[0].path }}"
+            state: absent
+
+        - name: "УСПЕШНАЯ ПЕРЕЗАГРУЗКА"
+          debug:
+            msg: "Хост {{ inventory_hostname }} успешно перезагружен"

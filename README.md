@@ -1,68 +1,54 @@
-# Ansible Linux Updates Management for AWX
+# AWX Linux Updates
 
-## Описание
-Этот репозиторий содержит плейбуки для управления обновлениями безопасности Linux серверов через AWX.
+Самодостаточные плейбуки для обновления безопасности Linux серверов через AWX — без внешних зависимостей.
 
 ## Структура
+
 ```
-├── playbooks/          # Основные плейбуки
-│   ├── update-critical.yml   # Обновление безопасности
-│   └── reboot-servers.yml    # Перезагрузка серверов
-├── inventories/        # Инвентари для разных окружений
-├── requirements.yml    # Внешние зависимости
-└── .gitignore
+awx-linux-updates/
+├── playbooks/
+│   ├── update-critical.yml   # Критические обновления (RHEL/Debian/SUSE)
+│   └── reboot-servers.yml    # Безопасная перезагрузка
+└── inventories/
+    ├── production/hosts.ini
+    └── staging/hosts.ini
 ```
 
 ## Использование в AWX
 
 ### Настройка проекта
-1. Создать Project в AWX
-2. Указать URL этого репозитория
-3. Включить опции:
-   - `Update Revision on Launch`
-   - `Update Role Dependencies`
+1. Создать **Project** в AWX, указать URL репозитория
+2. **ОТКЛЮЧИТЬ** опцию `Update Role Dependencies` (нет внешних ролей)
+3. **ВКЛЮЧИТЬ** `Update Revision on Launch`
 
-### Шаблоны заданий (Job Templates)
+### Job Templates
 
-#### 1. Security Updates Only
-- Playbook: `playbooks/update-critical.yml`
-- Variables:
-  ```yaml
-  target_hosts: production
-  update_level: security
-  auto_reboot: false
-  ```
+| Шаблон | Playbook | Описание |
+|--------|----------|---------|
+| Linux Security Updates | `playbooks/update-critical.yml` | Critical Security обновления |
+| Reboot After Updates | `playbooks/reboot-servers.yml` | Перезагрузка (после обновления) |
 
-#### 2. Проверка (Dry Run)
-- Используйте Check Mode в AWX
-- Variables:
-  ```yaml
-  target_hosts: staging
-  update_level: security
-  ansible_check_mode: true
-  ```
+### Переменные
 
-#### 3. Перезагрузка
-- Playbook: `playbooks/reboot-servers.yml`
-- Запускайте ПОСЛЕ успешного обновления
+| Variable | Default | Описание |
+|----------|---------|----------|
+| `target_hosts` | `all` | Группа хостов |
+| `update_serial` | `20%` | Процент серверов для параллельного обновления |
+| `log_dir` | `/var/log/ansible-updates` | Директория для логов |
 
-## Переменные для переопределения
+### Workflow (рекомендуется)
+1. **Check Mode** — `Linux Security Updates` с Extra Variables: `ansible_check_mode: true`
+2. **Apply** — `Linux Security Updates` с Extra Variables: `target_hosts: production`
+3. **Reboot** — `Reboot After Updates` (только если были изменения)
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `update_level` | `security` | `security` или `all` |
-| `auto_reboot` | `false` | Авто-перезагрузка (отключите в AWX) |
-| `update_serial` | `25%` | Процент серверов для одновременного обновления |
-| `target_hosts` | `all` | Целевая группа хостов |
+## Поддержка ОС
+- RHEL / CentOS / AlmaLinux / Rocky 7+
+- Debian / Ubuntu 18.04+
+- SUSE / openSUSE
 
-## Безопасность
-- Всегда сначала тестируйте на staging
-- Используйте Check Mode перед prod
-- Делайте backup перед обновлением
-- Обновляйте серверы порциями
-
-## Troubleshooting
-Если роль не скачивается в AWX, проверьте:
-1. Файл `requirements.yml` в корне репозитория
-2. Опция `Update Role Dependencies` включена
-3. У AWX есть доступ к GitHub
+## Преимущества
+- Нет внешних зависимостей (не нужны GitHub, Galaxy, роли)
+- Работает из коробки после клонирования
+- Полный контроль над каждой командой
+- Логирование всех действий
+- Только critical/security обновления
