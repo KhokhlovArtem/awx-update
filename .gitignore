@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+
+# Ansible
+*.retry
+*.log
+.ansible/
+ansible.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (ВАЖНО!)
+*.vault
+*.key
+*.pem
+secrets.yml
+vault-password.txt
+
+# Temporary
+tmp/
+temp/
+*.tmp
+
+# AWX
+.awx/

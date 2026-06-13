@@ -1,0 +1,21 @@
+---
+# Переменные для всех хостов в production
+
+# Ansible настройки
+ansible_connection: ssh
+ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+
+# Настройки обновлений (переопределяют defaults в роли)
+update_level: security
+auto_reboot: false
+update_serial: "25%"
+maintenance_window: "03:00-05:00"
+
+# Уведомления
+notify_on_success: false
+notify_on_failure: true
+notification_email: "admin@example.com"
+
+# Backup перед обновлением
+backup_enabled: true
+backup_path: "/backup/pre-update"

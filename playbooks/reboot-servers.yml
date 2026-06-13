@@ -1,0 +1,52 @@
+---
+- name: "Безопасная перезагрузка серверов после обновлений"
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
+  gather_facts: yes
+
+  # Перезагружаем по одному серверу
+  serial: 1
+
+  vars:
+    reboot_wait: 120  # Секунд ждем после перезагрузки
+    reboot_timeout: 600
+
+  tasks:
+    - name: "Проверка наличия триггера перезагрузки"
+      stat:
+        path: /var/run/reboot-required.ansible
+      register: reboot_required_file
+
+    - name: "Пропуск хостов, не требующих перезагрузки"
+      debug:
+        msg: "Хост {{ inventory_hostname }} не требует перезагрузки, пропускаем"
+      when: not reboot_required_file.stat.exists
+
+    - name: "Блок перезагрузки для требующих хостов"
+      block:
+        - name: "Предупреждение о перезагрузке"
+          debug:
+            msg: "ПЕРЕЗАГРУЗКА ХОСТА {{ inventory_hostname }} через 10 секунд"
+
+        - name: "Перезагрузка сервера"
+          reboot:
+            reboot_timeout: "{{ reboot_timeout }}"
+            pre_reboot_delay: 10
+            post_reboot_delay: "{{ reboot_wait }}"
+            msg: "Плановая перезагрузка после обновления безопасности"
+          register: reboot_result
+
+        - name: "Удаление файла-триггера после успешной перезагрузки"
+          file:
+            path: /var/run/reboot-required.ansible
+            state: absent
+
+        - name: "Проверка доступности сервисов после перезагрузки"
+          wait_for:
+            host: "{{ inventory_hostname }}"
+            port: 22
+            delay: 10
+            timeout: 300
+          delegate_to: localhost
+
+      when: reboot_required_file.stat.exists

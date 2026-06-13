@@ -1,0 +1,25 @@
+---
+- name: "Откат обновлений (заглушка)"
+  hosts: "{{ target_hosts | default('all') }}"
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: "Информация об откате"
+      debug:
+        msg:
+          - "========================================"
+          - "Откат обновлений на хосте {{ inventory_hostname }}"
+          - "Эта роль требует дополнительной настройки"
+          - "========================================"
+
+    - name: "Проверка наличия yum history"
+      command: "yum history list | head -20"
+      register: yum_history
+      when: ansible_os_family == "RedHat"
+      ignore_errors: yes
+
+    - name: "Вывод истории yum"
+      debug:
+        var: yum_history.stdout_lines
+      when: yum_history is defined

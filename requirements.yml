@@ -1,0 +1,21 @@
+---
+# Файл зависимостей для Ansible Galaxy
+# AWX автоматически загрузит все указанные здесь роли
+
+roles:
+  # Основная роль для обновлений
+  - name: joe-speedboat.os_update
+    src: https://github.com/joe-speedboat/ansible-role-os_update.git
+    scm: git
+    version: main  # или конкретный тег, например: v2.1.0
+
+  # Дополнительная роль для проверки перезагрузки (опционально)
+  - name: ansible-role-reboot-check
+    src: https://github.com/weareinteractive/ansible-reboot.git
+    scm: git
+    version: master
+
+# Если нужны коллекции
+collections:
+  - name: community.general
+    version: ">=8.0.0"

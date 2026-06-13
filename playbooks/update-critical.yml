@@ -1,0 +1,70 @@
+---
+- name: "Критическое обновление серверов Linux (только Security)"
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: yes
+  become: yes
+
+  # Обновляем серверы порциями по 25%, чтобы не потерять все сразу
+  serial: "{{ update_serial | default('25%') }}"
+
+  # Максимальное время выполнения 2 часа
+  max_fail_percentage: 10
+
+  vars:
+    # Настройки обновления
+    os_update_level: "{{ update_level | default('security') }}"
+    os_update_reboot: "{{ auto_reboot | default(false) }}"
+    os_update_reboot_timeout: 300
+    os_update_remove_old_kernel: true
+    os_update_include_obsoletes: false
+
+    # Логирование
+    os_update_logfile: /var/log/ansible-security-updates.log
+
+  pre_tasks:
+    - name: "Проверка версии ОС"
+      fail:
+        msg: "Эта роль поддерживает только RHEL/CentOS/Rocky/AlmaLinux 7+ и Ubuntu 18.04+"
+      when:
+        - ansible_os_family != "RedHat"
+        - ansible_distribution != "Ubuntu"
+        - ansible_distribution != "Debian"
+
+    - name: "Создание backup списка пакетов до обновления"
+      copy:
+        content: |
+          Дата: {{ ansible_date_time.iso8601 }}
+          Хост: {{ inventory_hostname }}
+          Установленные пакеты до обновления:
+          ---
+        dest: "/tmp/pre-update-packages-{{ ansible_date_time.epoch }}.txt"
+      delegate_to: localhost
+      run_once: true
+
+  roles:
+    - role: joe-speedboat.os_update
+
+  post_tasks:
+    - name: "Сохранение списка обновленных пакетов"
+      command: "rpm -qa --last | head -50"
+      register: updated_packages
+      when: ansible_os_family == "RedHat"
+
+    - name: "Вывод информации о перезагрузке"
+      debug:
+        msg:
+          - "========================================"
+          - "ОБНОВЛЕНИЕ ЗАВЕРШЕНО НА ХОСТЕ {{ inventory_hostname }}"
+          - "Требуется перезагрузка: {{ ansible_reboot_pending | default(false) }}"
+          - "========================================"
+
+    - name: "Создание файла-триггера для перезагрузки"
+      copy:
+        content: "{{ ansible_date_time.iso8601 }} - Требуется перезагрузка после обновления"
+        dest: "/var/run/reboot-required.ansible"
+      when: ansible_reboot_pending | default(false)
+
+    - name: "Вывод последних обновленных пакетов"
+      debug:
+        var: updated_packages.stdout_lines[0:20]
+      when: updated_packages is defined

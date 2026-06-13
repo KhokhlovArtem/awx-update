@@ -1,0 +1,12 @@
+---
+# Специфичный для AWX формат requirements.yml
+# Некоторые версии AWX ожидают именно такой синтаксис
+
+roles:
+  - name: joe-speedboat.os_update
+    src: https://github.com/joe-speedboat/ansible-role-os_update.git
+    version: main
+
+# Или прямая ссылка на архив (если GitHub недоступен)
+# - name: joe-speedboat.os_update
+#   src: https://github.com/joe-speedboat/ansible-role-os_update/archive/main.tar.gz

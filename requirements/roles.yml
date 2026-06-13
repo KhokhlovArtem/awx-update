@@ -1,0 +1,6 @@
+---
+roles:
+  - name: joe-speedboat.os_update
+    src: https://github.com/joe-speedboat/ansible-role-os_update.git
+    scm: git
+    version: main
